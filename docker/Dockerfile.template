@@ -1,0 +1,66 @@
+# CollabPlay Sandboxed Execution Environment
+# This Dockerfile template shows the security configuration for code execution
+
+# ============================================
+# JavaScript/TypeScript Runner
+# ============================================
+# FROM node:20-alpine AS node-runner
+# RUN adduser -D -u 1000 runner
+# USER runner
+# WORKDIR /app
+# ENTRYPOINT ["node"]
+
+# ============================================
+# Python Runner
+# ============================================
+# FROM python:3.11-alpine AS python-runner
+# RUN adduser -D -u 1000 runner
+# USER runner
+# WORKDIR /app
+# ENTRYPOINT ["python"]
+
+# ============================================
+# Go Runner
+# ============================================
+# FROM golang:1.21-alpine AS go-runner
+# RUN adduser -D -u 1000 runner
+# USER runner
+# WORKDIR /app
+# ENTRYPOINT ["go", "run"]
+
+# ============================================
+# Example: Node.js Runner (Active)
+# ============================================
+FROM node:20-alpine
+
+# Security: Create non-root user
+RUN adduser -D -u 1000 runner
+
+# Security: Remove unnecessary packages
+RUN apk --no-cache add ca-certificates \
+    && rm -rf /var/cache/apk/*
+
+# Set working directory
+WORKDIR /sandbox
+
+# Switch to non-root user
+USER runner
+
+# Default entrypoint
+ENTRYPOINT ["node"]
+
+# ============================================
+# Build Instructions:
+# docker build -t collabplay-runner:node -f Dockerfile.template .
+#
+# Run with security constraints:
+# docker run --rm \
+#   --network=none \
+#   --memory=128m \
+#   --cpus=0.5 \
+#   --pids-limit=50 \
+#   --read-only \
+#   --tmpfs=/tmp:rw,size=64m \
+#   --security-opt=no-new-privileges \
+#   collabplay-runner:node -e "console.log('Hello')"
+# ============================================
