@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Code2, FolderTree, Settings, Play, Eye } from "lucide-react";
 import { useCollaboration } from "@/hooks/useCollaboration";
 import { ResizablePanels } from "@/components/Layout/ResizablePanels";
@@ -8,24 +8,57 @@ import { ProjectSettings } from "@/components/Sidebar/ProjectSettings";
 import { CodeExecutor } from "@/components/Preview/CodeExecutor";
 import { PreviewPanel } from "@/components/Preview/PreviewPanel";
 import { ConnectionStatus } from "@/components/Common/ConnectionStatus";
+import { getLanguageFromFilename } from "@/components/Editor/FileTabs";
+import {
+  getExecutionLanguage,
+  isExecutable,
+} from "@/utils/execution-languages";
 
 type SidebarTab = "files" | "settings";
 type PreviewTab = "output" | "preview";
+
+// File content storage - content stored separately per file
+interface OpenFile {
+  id: string;
+  name: string;
+  language: string;
+}
 
 function App() {
   const { joinRoom, roomState } = useCollaboration();
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("files");
   const [previewTab, setPreviewTab] = useState<PreviewTab>("output");
-  const [currentCode, setCurrentCode] = useState(
-    '// Start coding...\nconsole.log("Hello, CollabPlay!");'
-  );
   const [isJoining, setIsJoining] = useState(false);
 
-  // Get room ID from URL params
+  // File management - separate content per file using a Map
+  const [openFiles, setOpenFiles] = useState<OpenFile[]>([
+    { id: "default", name: "index.ts", language: "typescript" },
+  ]);
+  const [activeFileId, setActiveFileId] = useState<string>("default");
+
+  // Store file contents in a ref to persist across re-renders without causing re-renders
+  const fileContentsRef = useRef<Map<string, string>>(
+    new Map([["default", '// index.ts\nconsole.log("Hello, CollabPlay!");']])
+  );
+
+  // Get current file content
+  const getCurrentContent = useCallback(() => {
+    return fileContentsRef.current.get(activeFileId) || "";
+  }, [activeFileId]);
+
+  // Current code for preview/execution
+  const [currentDisplayCode, setCurrentDisplayCode] = useState(
+    getCurrentContent()
+  );
+
+  // Update display code when switching files
+  useEffect(() => {
+    setCurrentDisplayCode(fileContentsRef.current.get(activeFileId) || "");
+  }, [activeFileId]);
+
   const urlParams = new URLSearchParams(window.location.search);
   const roomIdFromUrl = urlParams.get("room");
 
-  // Join room on mount if room ID in URL
   useEffect(() => {
     if (roomIdFromUrl && !roomState.isConnected && !isJoining) {
       const storedName = localStorage.getItem("collabplay-username");
@@ -35,14 +68,12 @@ function App() {
     }
   }, [roomIdFromUrl, roomState.isConnected, isJoining]);
 
-  // Handle room join
   const handleJoinRoom = useCallback(
     async (roomId: string, name: string) => {
       setIsJoining(true);
       try {
         await joinRoom(roomId, name);
         localStorage.setItem("collabplay-username", name);
-        // Update URL
         const url = new URL(window.location.href);
         url.searchParams.set("room", roomId);
         window.history.pushState({}, "", url.toString());
@@ -55,19 +86,70 @@ function App() {
     [joinRoom]
   );
 
-  // Handle code change from editor
-  const handleCodeChange = useCallback((code: string) => {
-    setCurrentCode(code);
+  // Handle file selection - open file in editor
+  const handleFileSelect = useCallback(
+    (fileId: string, fileName: string) => {
+      const existingFile = openFiles.find((f) => f.id === fileId);
+      if (existingFile) {
+        setActiveFileId(fileId);
+      } else {
+        const language = getLanguageFromFilename(fileName);
+        const newFile: OpenFile = { id: fileId, name: fileName, language };
+
+        // Initialize content for new file
+        if (!fileContentsRef.current.has(fileId)) {
+          fileContentsRef.current.set(fileId, `// ${fileName}\n`);
+        }
+
+        setOpenFiles((prev) => [...prev, newFile]);
+        setActiveFileId(fileId);
+      }
+    },
+    [openFiles]
+  );
+
+  // Handle code change - save to current file's content
+  const handleCodeChange = useCallback(
+    (code: string) => {
+      fileContentsRef.current.set(activeFileId, code);
+      setCurrentDisplayCode(code);
+    },
+    [activeFileId]
+  );
+
+  // Handle tab click - switch active file
+  const handleTabClick = useCallback((fileId: string) => {
+    setActiveFileId(fileId);
   }, []);
 
-  // If not connected, show join screen
+  // Handle tab close
+  const handleTabClose = useCallback(
+    (fileId: string) => {
+      setOpenFiles((prev) => {
+        const filtered = prev.filter((f) => f.id !== fileId);
+        if (activeFileId === fileId && filtered.length > 0) {
+          setActiveFileId(filtered[0].id);
+        }
+        return filtered.length > 0 ? filtered : prev;
+      });
+    },
+    [activeFileId]
+  );
+
+  // Get current file for display
+  const currentFile = openFiles.find((f) => f.id === activeFileId);
+  const currentLanguage = currentFile?.language || "typescript";
+
+  // Get execution language for code runner (maps Monaco language to execution language)
+  const executionLanguage = getExecutionLanguage(currentLanguage);
+  const canExecute = isExecutable(currentLanguage);
+
   if (!roomState.isConnected && !isJoining) {
     return (
       <JoinScreen defaultRoomId={roomIdFromUrl || ""} onJoin={handleJoinRoom} />
     );
   }
 
-  // Loading state
   if (isJoining) {
     return (
       <div className="loading-screen">
@@ -82,9 +164,16 @@ function App() {
     );
   }
 
+  const fileTabs = openFiles.map((f) => ({
+    id: f.id,
+    name: f.name,
+    language: f.language,
+    isActive: f.id === activeFileId,
+    hasUnsavedChanges: false,
+  }));
+
   return (
     <div className="app">
-      {/* Header */}
       <header className="app__header">
         <div className="app__logo">
           <Code2 size={24} />
@@ -95,12 +184,10 @@ function App() {
         </div>
       </header>
 
-      {/* Main content */}
       <main className="app__main">
         <ResizablePanels
           storageKey="main-layout"
           panels={[
-            // Sidebar
             {
               id: "sidebar",
               minSize: 15,
@@ -124,20 +211,30 @@ function App() {
                     </button>
                   </div>
                   <div className="sidebar__content">
-                    {sidebarTab === "files" && <FileExplorer />}
+                    {sidebarTab === "files" && (
+                      <FileExplorer onFileSelect={handleFileSelect} />
+                    )}
                     {sidebarTab === "settings" && <ProjectSettings />}
                   </div>
                 </div>
               ),
             },
-            // Editor
             {
               id: "editor",
               minSize: 30,
               defaultSize: 50,
-              content: <MonacoEditor onContentChange={handleCodeChange} />,
+              content: (
+                <MonacoEditor
+                  key={activeFileId}
+                  defaultLanguage={currentLanguage}
+                  defaultValue={getCurrentContent()}
+                  onContentChange={handleCodeChange}
+                  files={fileTabs}
+                  onTabClick={handleTabClick}
+                  onTabClose={handleTabClose}
+                />
+              ),
             },
-            // Preview/Output
             {
               id: "preview",
               minSize: 20,
@@ -159,11 +256,55 @@ function App() {
                     </button>
                   </div>
                   <div className="preview-container__content">
-                    {previewTab === "output" && (
-                      <CodeExecutor code={currentCode} language="typescript" />
+                    {previewTab === "output" &&
+                      canExecute &&
+                      executionLanguage && (
+                        <CodeExecutor
+                          code={currentDisplayCode}
+                          language={executionLanguage}
+                        />
+                      )}
+                    {previewTab === "output" && !canExecute && (
+                      <div className="non-executable-msg">
+                        <p>📄 This file type cannot be executed.</p>
+                        <p>
+                          Switch to <strong>Preview</strong> tab to view
+                          HTML/CSS files.
+                        </p>
+                        <style>{`.non-executable-msg { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #888; text-align: center; gap: 8px; }`}</style>
+                      </div>
                     )}
                     {previewTab === "preview" && (
-                      <PreviewPanel jsContent={currentCode} />
+                      <PreviewPanel
+                        htmlContent={
+                          currentLanguage === "html"
+                            ? currentDisplayCode
+                            : undefined
+                        }
+                        cssContent={
+                          currentLanguage === "css"
+                            ? currentDisplayCode
+                            : undefined
+                        }
+                        jsContent={
+                          currentLanguage !== "html" &&
+                          currentLanguage !== "css"
+                            ? currentDisplayCode
+                            : undefined
+                        }
+                        projectFiles={
+                          // Convert fileContentsRef to VirtualFile array for bundling
+                          Array.from(fileContentsRef.current.entries()).map(
+                            ([id, content]) => {
+                              const file = openFiles.find((f) => f.id === id);
+                              return {
+                                path: file?.name || `${id}.js`,
+                                content,
+                              };
+                            }
+                          )
+                        }
+                      />
                     )}
                   </div>
                 </div>
@@ -173,15 +314,12 @@ function App() {
         />
       </main>
 
-      {/* Status bar */}
       <ConnectionStatus />
-
       <style>{appStyles}</style>
     </div>
   );
 }
 
-// Join screen component
 function JoinScreen({
   defaultRoomId,
   onJoin,

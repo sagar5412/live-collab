@@ -86,14 +86,14 @@ export const LANGUAGE_CONFIGS: Record<
   DockerConfig
 > = {
   javascript: {
-    image: "node:20-alpine",
+    image: "collabplay-runner",
     command: ["node", "-e"],
     timeout: 10000,
     memoryLimit: "128m",
     cpuLimit: "0.5",
   },
   typescript: {
-    image: "node:20-alpine",
+    image: "collabplay-runner",
     command: ["npx", "tsx", "-e"],
     timeout: 15000,
     memoryLimit: "256m",

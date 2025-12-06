@@ -16,6 +16,7 @@
     "@tailwindcss/postcss": "^4.1.17",
     "autoprefixer": "^10.4.22",
     "cors": "^2.8.5",
+    "esbuild-wasm": "^0.27.1",
     "express": "^5.2.1",
     "lib0": "^0.2.114",
     "lucide-react": "^0.556.0",

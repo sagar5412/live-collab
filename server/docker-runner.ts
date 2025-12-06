@@ -60,9 +60,7 @@ export async function executeCode(
         request.language
       );
 
-      process = spawn("docker", dockerArgs, {
-        shell: true,
-      });
+      process = spawn("docker", dockerArgs);
 
       process.stdout?.on("data", (data: Buffer) => {
         stdout += data.toString();
@@ -141,35 +139,40 @@ function buildDockerArgs(
     "--security-opt=no-new-privileges", // Prevent privilege escalation
   ];
 
-  // Escape code for shell safety
-  const escapedCode = escapeShellArg(code);
+  // Escape code for shell safety using base64
+  const base64 = Buffer.from(code).toString("base64");
 
-  // Language-specific handling
-  if (language === "javascript" || language === "python") {
+  // All languages need --entrypoint to override the Node entrypoint in the image
+  // Then use sh -c wrapper for base64 decoding and execution
+  if (language === "javascript") {
+    args.push("--entrypoint", "/bin/sh");
     args.push(config.image);
-    args.push(...config.command);
-    args.push(escapedCode);
+    args.push("-c", `echo '${base64}' | base64 -d | node`);
+  } else if (language === "python") {
+    args.push("--entrypoint", "/bin/sh");
+    args.push(config.image);
+    args.push("-c", `echo '${base64}' | base64 -d | python`);
   } else if (language === "typescript") {
     // TypeScript needs special handling - write to file first
+    args.push("--entrypoint", "/bin/sh");
     args.push(config.image);
     args.push(
-      "sh",
       "-c",
-      `echo ${escapedCode} > /tmp/code.ts && npx tsx /tmp/code.ts`
+      `echo '${base64}' | base64 -d > /tmp/code.ts && npx tsx /tmp/code.ts`
     );
   } else if (language === "go") {
+    args.push("--entrypoint", "/bin/sh");
     args.push(config.image);
     args.push(
-      "sh",
       "-c",
-      `echo ${escapedCode} > /tmp/main.go && go run /tmp/main.go`
+      `echo '${base64}' | base64 -d > /tmp/main.go && go run /tmp/main.go`
     );
   } else if (language === "rust") {
+    args.push("--entrypoint", "/bin/sh");
     args.push(config.image);
     args.push(
-      "sh",
       "-c",
-      `echo ${escapedCode} > /tmp/main.rs && rustc --edition=2021 -o /tmp/out /tmp/main.rs && /tmp/out`
+      `echo '${base64}' | base64 -d > /tmp/main.rs && rustc --edition=2021 -o /tmp/out /tmp/main.rs && /tmp/out`
     );
   }
 
@@ -190,7 +193,7 @@ function escapeShellArg(arg: string): string {
  */
 async function checkDockerAvailable(): Promise<boolean> {
   return new Promise((resolve) => {
-    const process = spawn("docker", ["version"], { shell: true });
+    const process = spawn("docker", ["version"]);
     process.on("close", (code) => {
       resolve(code === 0);
     });

@@ -63,14 +63,17 @@ export function FileExplorer({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [_contextMenuId, setContextMenuId] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
 
   // Handle file selection
   const handleFileClick = useCallback(
     (node: FileNode) => {
       if (node.type === "folder") {
         toggleFolder(node.id);
+        setSelectedFolderId(node.id); // Select folder for creating files inside
       } else {
         selectFile(node.id);
+        setSelectedFolderId(node.parentId); // Track parent folder
         onFileSelect?.(node.id, node.name);
       }
     },
@@ -86,14 +89,20 @@ export function FileExplorer({
     }
 
     if (isCreating === "file") {
-      handleCreateFile(createName);
+      handleCreateFile(createName, selectedFolderId); // Pass selected folder as parent
     } else if (isCreating === "folder") {
-      handleCreateFolder(createName);
+      handleCreateFolder(createName, selectedFolderId); // Pass selected folder as parent
     }
 
     setIsCreating(null);
     setCreateName("");
-  }, [createName, isCreating, handleCreateFile, handleCreateFolder]);
+  }, [
+    createName,
+    isCreating,
+    handleCreateFile,
+    handleCreateFolder,
+    selectedFolderId,
+  ]);
 
   // Handle rename submit
   const handleRenameSubmit = useCallback(() => {
